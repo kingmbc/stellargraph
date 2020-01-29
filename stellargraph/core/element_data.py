@@ -107,6 +107,8 @@ class ElementData:
         shared (dict of type name to pandas DataFrame): information for the elements of each type
     """
 
+    _required_shared_columns = []
+
     def __init__(self, shared):
         if not isinstance(shared, dict):
             raise TypeError(f"shared: expected dict, found {type(shared)}")
@@ -116,6 +118,10 @@ class ElementData:
                 raise TypeError(
                     f"shared[{key!r}]: expected pandas DataFrame', found {type(value)}"
                 )
+
+            require_dataframe_has_columns(
+                f"shared[{key!r}]", value, self._required_shared_columns
+            )
 
         type_element_ilocs = {}
         rows_so_far = 0
@@ -134,7 +140,11 @@ class ElementData:
             type_sizes.append(size)
             type_dfs.append(type_data)
 
-        all_columns = pd.concat(type_dfs)
+        if type_dfs:
+            all_columns = pd.concat(type_dfs)
+        else:
+            all_columns = pd.DataFrame(columns=self._required_shared_columns)
+
         self._id_index = ExternalIdIndex(all_columns.index)
         self._columns = {
             name: data.to_numpy() for name, data in all_columns.iteritems()
@@ -270,7 +280,7 @@ class NodeData(ElementData):
 
 
 def _numpyise(d):
-    return {k: np.array(v) for k, v in d.items()}
+    return {k: np.sort(v) for k, v in d.items()}
 
 
 class EdgeData(ElementData):
@@ -280,13 +290,10 @@ class EdgeData(ElementData):
         node_data (NodeData): the nodes that these edges correspond to
     """
 
+    _required_shared_columns = [SOURCE, TARGET, WEIGHT]
+
     def __init__(self, shared, node_data: NodeData):
         super().__init__(shared)
-
-        for key, value in shared.items():
-            require_dataframe_has_columns(
-                f"features[{key!r}]", value, [SOURCE, TARGET, WEIGHT]
-            )
 
         self._nodes = node_data
 
@@ -306,7 +313,7 @@ class EdgeData(ElementData):
         self._edges_in_dict = _numpyise(in_dict)
         self._edges_out_dict = _numpyise(out_dict)
         self._edges_dict = _numpyise(undirected)
-        self._empty_ids = self.sources[0:0]
+        self._empty_ilocs = np.array([], dtype=np.int64)
 
     def _adj_lookup(self, *, ins, outs):
         if ins and outs:
@@ -371,4 +378,4 @@ class EdgeData(ElementData):
             The integer locations of the edges for the given node_id.
         """
 
-        return self._adj_lookup(ins=ins, outs=outs).get(node_id, self._empty_ids)
+        return self._adj_lookup(ins=ins, outs=outs).get(node_id, self._empty_ilocs)
